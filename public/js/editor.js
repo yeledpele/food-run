@@ -11,12 +11,14 @@ const ROLES = {
   6: 'donut boss (2x2)', 38: 'pudding boss (2x2)', 35: 'maki (rolls)', 36: 'salmon nigiri (hops)',
   37: 'tuna nigiri (throws wasabi)', 13: 'heart (hud)', 17: 'hero firing', 33: 'hero firing 2',
   40: 'meatball (chases, may drop heart)', 42: 'pizza slice (stabs, can\'t be stomped)',
-  44: 'gelato boss (2x2)',
+  44: 'gelato boss (2x2)', 46: 'cake boss (2x2)', 48: 'croissant (flies, swoops)',
+  50: 'macaron (hops, random flavour)',
 };
-const STAMP = { 6: [[6, 7], [22, 23]], 38: [[38, 39], [54, 55]], 44: [[44, 45], [60, 61]] };   // 2x2 bosses
-const HIDDEN = [7, 22, 23, 39, 54, 55, 41, 43, 45, 60, 61];   // other halves / animation frames
+const STAMP = { 6: [[6, 7], [22, 23]], 38: [[38, 39], [54, 55]], 44: [[44, 45], [60, 61]],
+  46: [[46, 47], [62, 63]] };   // 2x2 bosses
+const HIDDEN = [7, 22, 23, 39, 54, 55, 41, 43, 45, 60, 61, 47, 62, 63, 49, 51];   // other halves / frames
 // the in-game palette swap for each theme's bricks
-const THEME_PAL = { sakura: { 8: 4, 14: 9 }, italy: { 8: 6, 14: 7, 2: 13 } };
+const THEME_PAL = { sakura: { 8: 4, 14: 9 }, italy: { 8: 6, 14: 7, 2: 13 }, paris: { 8: 5, 14: 6, 2: 1 } };
 const FLAG_NAMES = ['solid', 'breakable (charged beam)', 'flag 2', 'flag 3', 'flag 4', 'flag 5', 'flag 6', 'flag 7'];
 
 let sprites, sel = 1, color = 7, clip = null;
@@ -264,7 +266,7 @@ function drawMap() {
   c.width = level.width * z; c.height = level.height * z;
   const g = c.getContext('2d');
   g.imageSmoothingEnabled = false;
-  g.fillStyle = { sakura: '#1a0d1e', italy: '#14183a' }[level.theme] || '#05050a';
+  g.fillStyle = { sakura: '#1a0d1e', italy: '#14183a', paris: '#10142a' }[level.theme] || '#05050a';
   g.fillRect(0, 0, c.width, c.height);
   const sheet = sheetCanvas(level.theme);
   for (let y = 0; y < level.height; y++) for (let x = 0; x < level.width; x++) {

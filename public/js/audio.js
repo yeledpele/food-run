@@ -20,7 +20,7 @@ export class Synth {
       if (!C) return;
       this.ctx = new C();
       this.out = this.ctx.createGain();
-      this.out.gain.value = 0.8;
+      this.out.gain.value = this.muted ? 0 : 0.8;
       this.out.connect(this.ctx.destination);
       this.buildWaves();
     }
@@ -52,6 +52,11 @@ export class Synth {
     this.noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+
+  setMuted(m) {
+    this.muted = m;
+    if (this.out) this.out.gain.value = m ? 0 : 0.8;
   }
 
   freq(p) { return 65.406 * Math.pow(2, p / 12); }
@@ -137,7 +142,13 @@ export class Synth {
     const m = this.data.music[this.pat];
     if (!m) { this.pat = -1; return; }
     let len = 0;
-    m.channels.forEach(id => { if (id !== null) len = Math.max(len, this.play(id, this.next, this.mg) && this.data.sfx[id].speed * 32 * NOTE_SEC); });
+    // a pattern lasts as long as its sfx (32 notes, or `len` - e.g. 24 for 3/4 time)
+    m.channels.forEach(id => {
+      if (id === null) return;
+      const s = this.data.sfx[id];
+      this.play(id, this.next, this.mg);
+      len = Math.max(len, s.speed * (s.len || 32) * NOTE_SEC);
+    });
     this.next += len || 1;
     if (m.flags & 2) {          // loop end: back to the nearest loop start
       let p = this.pat;

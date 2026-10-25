@@ -5,7 +5,7 @@ import { Pico, rnd, flr, mid, sgn, sin, cos, atan2 } from './pico.js';
 import { Synth } from './audio.js';
 
 const P = new Pico(document.getElementById('screen'));
-let SND = { sfx() {}, music() {}, wake() {} };
+let SND = { sfx() {}, music() {}, wake() {}, setMuted() {} };
 const sfx = n => SND.sfx(n);
 const music = (n, f) => SND.music(n, f);
 const palWhite = () => P.pal(Array(15).fill(7));
@@ -31,6 +31,24 @@ const btnp = b => tap[b] || (held[b] && !was[b]);
 // ------------------------------------------------------------ state
 let state = 'title', t = 0, camx = 0, camy = 0, wait = 0, shk = 0, hs = 0;
 let lv0 = 0, lv = 0, lives = 3, score = 0, wint = null, arena = false;
+// title menu (0 start, 1 options) and options screen (0 stage, 1 sound, 2 back)
+let menu = 0, osel = 0, sound = loadOpts().sound !== false;
+
+function loadOpts() {
+  try { return JSON.parse(localStorage.getItem('foodrun-options')) || {}; } catch (e) { return {}; }
+}
+function saveOpts() {
+  try { localStorage.setItem('foodrun-options', JSON.stringify({ sound })); } catch (e) { /* private mode */ }
+}
+
+function updOptions() {
+  if (btnp(2)) { osel = (osel + 2) % 3; sfx(6); }
+  if (btnp(3)) { osel = (osel + 1) % 3; sfx(6); }
+  const dir = btnp(1) ? 1 : btnp(0) ? -1 : 0;
+  if (osel === 0 && dir) lv0 = mid(0, lv0 + dir, LEVELS.length - 1);
+  if (osel === 1 && (dir || btnp(4))) { sound = !sound; SND.setMuted(!sound); saveOpts(); sfx(3); }
+  if (osel === 2 && (btnp(4) || btnp(5))) { state = 'title'; menu = 0; }
+}
 let L, MAP, ents = [], parts = [], pops = [], bolts = [], ebul = [], boss = null, puds = [];
 let p, cpx, cpy, hpfl = 0, hpup = 0;
 let LEVELS = [];
@@ -42,10 +60,13 @@ for (let i = 0; i < 60; i++)
 
 // enemy stats: explosion colours and score
 const ecol = { 2: [15, 4, 11, 8], 3: [10, 9, 8], 4: [7, 8, 6], 35: [3, 7, 9, 14], 36: [9, 7, 3], 37: [8, 7, 3],
-  40: [4, 2, 8, 9], 42: [10, 9, 8, 4] };
-const epts = { 2: 150, 3: 100, 4: 200, 35: 150, 36: 100, 37: 120, 40: 150, 42: 200 };
+  40: [4, 2, 8, 9], 42: [10, 9, 8, 4], 48: [9, 4, 15, 10], 50: [14, 7, 11, 12] };
+const epts = { 2: 150, 3: 100, 4: 200, 35: 150, 36: 100, 37: 120, 40: 150, 42: 200, 48: 150, 50: 120 };
+// chance that a defeated enemy leaves a heart
+const DROP = { 3: 1, 40: 0.3, 48: 0.3, 50: 0.2 };
 // what each theme shows between stages: enemies + boss sprite
-const PREVIEW = { city: [[2, 3, 4], 6], sakura: [[35, 36, 37], 38], italy: [[40, 42, 3], 44] };
+const PREVIEW = { city: [[2, 3, 4], 6], sakura: [[35, 36, 37], 38], italy: [[40, 42, 3], 44],
+  paris: [[48, 50, 48], 46] };
 
 // ------------------------------------------------------------ map
 const mget = (x, y) => (x < 0 || y < 0 || x >= L.w || y >= L.h) ? 0 : MAP[y * L.w + x];
@@ -88,6 +109,14 @@ function loadLevel() {
     else if (s === 35) mk(x, y, 35, 2);
     else if (s === 40) mk(x, y, 40, 2);          // meatball
     else if (s === 42) { const e = mk(x, y, 42, 2); e.oy = 0; e.h = 7; }  // pizza slice
+    else if (s === 48) { const e = mk(x, y, 48, 1); e.fly = true; e.hx = x; e.hy = y; }  // croissant (flies)
+    else if (s === 50) { const e = mk(x, y, 50, 2); e.oy = 1; e.h = 6; e.flav = rnd([14, 11, 12, 4]); } // macaron
+    else if (s === 46) {
+      // cake boss: drawn 24x24, three tiers; loses the top tier at half health
+      L.bs = 46;
+      boss = { cake: true, x, y: y - 8, s: 24, dx: 0, dy: 0, g: false, ox: 2, oy: 3, w: 19, h: 20, top: 0,
+        hp: L.bhp, mhp: L.bhp, st: 'wait', t: 0, fl: 0, atk: 50, j: 0, jv: 0, tier: 3 };
+    }
     else if (s === 44) {
       // gelato boss: drawn 24x24, walks, frost beam, throws scoops
       L.bs = 44;
@@ -109,7 +138,7 @@ function loadLevel() {
   }
   spawn(0);
   camx = 0; camy = L.top;
-  const tune = { sakura: 2, italy: 4 }[L.theme];
+  const tune = { sakura: 2, italy: 4, paris: 6 }[L.theme];
   if (tune !== undefined) music(tune, 1000);
 }
 
@@ -194,11 +223,14 @@ function update() {
   }
   if (state === 'title') {
     if (!LEVELS.length) return;
-    if (btnp(0)) lv0 = Math.max(lv0 - 1, 0);
-    if (btnp(1)) lv0 = Math.min(lv0 + 1, LEVELS.length - 1);
-    if (btnp(4) || btnp(5)) start();
+    if (btnp(2) || btnp(3)) { menu = 1 - menu; sfx(6); }
+    if (btnp(4) || btnp(5)) {
+      if (menu === 0) start();
+      else { state = 'options'; osel = 0; sfx(3); }
+    }
     return;
   }
+  if (state === 'options') { updOptions(); return; }
   if (hs > 0) { hs--; return; }
   if (hpfl > 0) hpfl--;
   if (hpup > 0) hpup--;
@@ -365,7 +397,8 @@ function updBolts() {
         }
       }
     } else if (o && !dead && o.st !== 'wait' && o.st !== 'die' && o.st !== 'intro'
-      && b.x >= o.x + 1 && b.x < o.x + (o.s || 16) - 1 && b.y + hy >= o.y + 1 && b.y - hy < o.y + (o.s || 16) - 1) {
+      && b.x >= o.x + 1 && b.x < o.x + (o.s || 16) - 1
+      && b.y + hy >= o.y + 1 + (o.top || 0) && b.y - hy < o.y + (o.s || 16) - 1) {
       dead = true; hitboss(b, b.big ? 4 : 1);
     }
     if (dead) bolts.splice(bolts.indexOf(b), 1);
@@ -380,8 +413,8 @@ function hurt(e, n, d) {
   boom(e.x + 4, e.y + 4, ecol[e.k]);
   score += epts[e.k]; pop(e.x, e.y - 2, '+' + epts[e.k], 10);
   ents.splice(ents.indexOf(e), 1);
-  // fries drop a heart; meatballs sometimes do
-  if (e.k === 3 || (e.k === 40 && rnd(1) < 0.3)) ents.push({ k: 9, x: e.x, y: e.y, dx: 0, dy: -2.5, ox: 1, oy: 2, w: 5, h: 5, g: false, life: 240 });
+  // fries always drop a heart, some others sometimes (see DROP)
+  if (rnd(1) < (DROP[e.k] || 0)) ents.push({ k: 9, x: e.x, y: e.y, dx: 0, dy: -2.5, ox: 1, oy: 2, w: 5, h: 5, g: false, life: 240 });
   shk = Math.max(shk, 3); hs = 2; sfx(2);
 }
 
@@ -390,6 +423,7 @@ function updEnts() {
     if (e.k === 8) {
       if (!e.on && touch(e.x, e.y, 8, 8)) {
         e.on = true; cpx = e.x; cpy = e.y; sfx(3);
+        if (p.hp < 6) { p.hp = 6; hpup = 10; }        // checkpoints heal you to full
         spark(e.x + 3, e.y + 2, [11, 3, 7], 12);
         pop(e.x - 14, e.y - 8, 'checkpoint!', 11);
       }
@@ -407,10 +441,35 @@ function updEnts() {
   }
 }
 
+// croissant: drifts around its home spot, swoops at you when you pass below
+function updFlyer(e) {
+  e.cool = (e.cool || 0) - 1;
+  if (e.st === 'dive') {
+    const dx = e.tx - e.x, dy = e.ty - e.y, d = Math.hypot(dx, dy);
+    if (d < 3 || --e.tm <= 0 || solid(e.x + 4, e.y + 4)) e.st = 'up';
+    else { e.x += dx / d * 1.8; e.y += dy / d * 1.8; }
+  } else if (e.st === 'up') {
+    const dx = e.hx - e.x, dy = e.hy - e.y, d = Math.hypot(dx, dy);
+    if (d < 2) { e.st = null; e.cool = 70; } else { e.x += dx / d; e.y += dy / d; }
+  } else {
+    e.x += (e.hx + sin(e.t / 90) * 20 - e.x) * 0.1;
+    e.y += (e.hy + sin(e.t / 30) * 3 - e.y) * 0.1;
+    if (e.cool <= 0 && p.dead === 0 && Math.abs(p.x - e.x) < 48 && p.y > e.y + 8 && p.y - e.y < 72) {
+      e.st = 'dive'; e.tx = p.x; e.ty = p.y; e.tm = 60; sfx(10); pop(e.x + 2, e.y - 8, '!', 9);
+    }
+  }
+  e.f = p.x < e.x;
+  if (p.dead === 0 && touch(e.x + 1, e.y + 1, 6, 6)) {
+    if (p.dy > 0 && p.y < e.y - 1) { p.dy = -3; p.sq = -3; e.hp = 0; hurt(e, 0, 0); }
+    else if (p.inv === 0) dmg(e.x);
+  }
+}
+
 function updEnemy(e) {
   e.t++;
   if (e.fl > 0) e.fl--;
-  const hop = e.k === 2 || e.k === 36;
+  if (e.fly) { updFlyer(e); return; }
+  const hop = e.k === 2 || e.k === 36 || e.k === 50;
   const ahead = () => { const ax = e.dir > 0 ? e.x + 8 : e.x - 1; return solid(ax, e.y + 4) || !solid(ax, e.y + 9); };
   const near = r => p.dead === 0 && Math.abs(p.y - e.y) < 12 && Math.abs(p.x - e.x) < r;
   if (e.k === 40) {
@@ -438,15 +497,15 @@ function updEnemy(e) {
     }
     e.f = e.dir < 0;
   } else if (hop) {
-    // burger / salmon nigiri: hop at you
-    const wt = e.k === 2 ? 40 : 22;
+    // burger / salmon nigiri / macaron: hop at you
+    const [wt, hx, hy] = { 2: [40, 0.7, -2.6], 36: [22, 1, -2], 50: [30, 0.9, -3] }[e.k];
     if (e.g) {
       e.dx = 0;
       if (e.t > wt) {
         let d = sgn(p.x - e.x);
         if (!solid(e.x + 4 + d * 14, e.y + 12)) d = -d;
-        e.dx = d * (e.k === 2 ? 0.7 : 1);
-        e.dy = e.k === 2 ? -2.6 : -2;
+        e.dx = d * hx;
+        e.dy = hy;
         e.t = 0; e.sq = -4; e.f = d < 0;
         dust(e.x + 4, e.y + 8, 2);
       } else if (e.t > wt - 12) e.sq = 2;
@@ -487,6 +546,8 @@ function updEbul() {
   for (const b of [...ebul]) {
     b.x += b.dx; b.y += b.dy;
     if (b.g) b.dy += b.g;
+    // cake slices bounce once off the floor
+    if (b.bounce && b.dy > 0 && solid(b.x, b.y + 2)) { b.y -= b.dy; b.dy *= -0.6; b.bounce = false; }
     let dead = b.x < camx - 8 || b.x > camx + 136 || b.y > camy + 136 || b.y < camy - 8
       || solid(b.x, b.y) || (b.wave && !solid(b.x, b.y + 4));
     if (!dead && p.dead === 0 && p.inv === 0 && b.x > p.x + 1 && b.x < p.x + 7 && b.y > p.y + 1 && b.y < p.y + 8) {
@@ -510,8 +571,16 @@ function updBoss() {
     cpx = L.acx; cpy = L.acy;
     sfx(9); shk = 6; music(0, 500);
   }
+  // every boss drops one heart when it reaches half health
+  if (!b.halfDrop && b.mhp && b.hp > 0 && b.hp < b.mhp / 2 && b.st !== 'die') {
+    b.halfDrop = true;
+    const src = b.pud ? puds[0] : b;
+    if (src) ents.push({ k: 9, x: src.x + (src.s || 16) / 2 - 4, y: src.y, dx: 0, dy: -3,
+      ox: 1, oy: 2, w: 5, h: 5, g: false, life: 360 });
+  }
   if (b.pud) { updPud(b); return; }
   if (b.gel) { updGelato(b); return; }
+  if (b.cake) { updCake(b); return; }
   b.t++;
   if (b.fl > 0) b.fl--;
   b.sx += (1 - b.sx) * 0.2; b.sy += (1 - b.sy) * 0.2;
@@ -636,12 +705,90 @@ function updGelato(b) {
         // hop to the other side of the room
         b.dx = (p.x < L.ax + 64 ? 1 : -1) * 1.6; b.dy = -4; b.j = -0.3; b.jv = 0; sfx(26);
       }
-      b.atk = mad ? 35 : 55;
+      b.atk = mad ? 32 : 50;
     } else if (b.g) {
       b.dx = mid(-0.4, b.dx + sgn(p.x - cx) * 0.05, 0.4);      // shuffle toward you
     }
   }
-  if (b.st !== 'wait' && p.dead === 0 && p.inv === 0 && touch(b.x + 3, b.y + 4, 18, 20)) dmg(cx);
+  if (b.st !== 'wait' && p.dead === 0 && p.inv === 0 && touch(b.x + 3, b.y + 4, 18, 20)) {
+    dmg(cx); bounceOff(b, cx);
+  }
+}
+
+// cake: a three-tier cake with candles. Shoots candle fireballs, lobs cake
+// slices that bounce, jumps onto you. At half health the top tier blows off:
+// it gets shorter, faster and fires more.
+function updCake(b) {
+  b.t++;
+  if (b.fl > 0) b.fl--;
+  const cx = b.x + 12;
+  b.dy = Math.min(b.dy + 0.3, 6);
+  const vy = b.dy;
+  phys(b);
+  b.x = mid(L.ax + 1, b.x, L.ax + 119 - b.s);
+  b.jv += -b.j * 0.25; b.jv *= 0.85; b.j += b.jv;            // spongy wobble
+  if (b.land) {
+    b.jv += Math.min(vy, 6) * 0.05; dust(cx, b.y + 24, 10);
+    if (b.st === 'fight') {
+      shk = 8; sfx(11);
+      for (const d of [-1, 1]) eb(cx + d * 10, b.y + 22, d * 2.2, 0, 14, 2, undefined, 'wave');
+    }
+  }
+  if (b.g) b.dx *= 0.75;
+  if (b.st === 'intro') {
+    if (b.t % 12 === 0) { shk = 4; b.jv += 0.12; }
+    if (b.t > 75) { b.st = 'fight'; b.t = 0; }
+  } else if (b.st === 'die') {
+    if (b.t % 4 === 0) { boom(b.x + rnd(24), b.y + b.top + rnd(24 - b.top), [15, 14, 7, 4, 8], 6); shk = 4; sfx(8); }
+    if (b.t > 80) {
+      boom(cx, b.y + 14, [15, 14, 7, 4, 8, 10], 60);
+      shk = 14; hs = 6; sfx(8); score += 5000;
+      pop(b.x, b.y, '+5000', 10);
+      boss = null; wint = 50;
+    }
+    return;
+  } else if (b.st === 'fight') {
+    if (b.tier === 3 && b.hp < b.mhp / 2) {
+      // the top tier blows off
+      b.tier = 2; b.top = 9; b.oy = 12; b.h = 11;
+      boom(cx, b.y + 6, [7, 14, 15, 12], 30); shk = 10; hs = 4; sfx(8);
+      pop(cx - 12, b.y - 4, 'angry!', 8);
+      for (let i = 0; i < 6; i++) eb(cx, b.y + 4, rnd(3) - 1.5, -2 - rnd(2), rnd([7, 14, 15]), 1, 0.15);
+    }
+    const fast = b.tier < 3;
+    if (b.g && --b.atk <= 0) {
+      const r = rnd(1);
+      if (r < 0.4) {
+        // candle fireballs: an aimed spread from the top
+        const n = fast ? 4 : 3, cy = b.y + b.top + 2, a = atan2(p.x + 4 - cx, p.y + 5 - cy);
+        for (let i = 0; i < n; i++) {
+          const k = i - (n - 1) / 2;
+          eb(cx + k * 4, cy, cos(a + k * 0.05) * 1.5, sin(a + k * 0.05) * 1.5, rnd([8, 9, 10]), 2);
+        }
+        sfx(10);
+      } else if (r < 0.7) {
+        // cake slices: lobbed at you, bounce once on the floor
+        for (const sp of fast ? [0.8, 1.4, 2] : [0.9, 1.6])
+          eb(cx, b.y + b.top + 4, sgn(p.x - cx) * sp, -3.2, 15, 2, 0.18, 'bounce');
+        sfx(10); b.jv -= 0.15;
+      } else {
+        // big jump: come down on the hero
+        b.dx = mid(-2.2, (p.x - cx) / 28, 2.2); b.dy = -5; b.j = -0.3; b.jv = 0; sfx(26);
+      }
+      b.atk = fast ? 34 : 52;
+    } else if (b.g && Math.abs(L.ax + 64 - cx) > 16) {
+      b.dx = mid(-0.3, b.dx + sgn(L.ax + 64 - cx) * 0.04, 0.3);   // drift back to the middle
+    }
+  }
+  if (b.st !== 'wait' && p.dead === 0 && p.inv === 0 && touch(b.x + 3, b.y + 4 + b.top, 18, 20 - b.top)) {
+    dmg(cx); bounceOff(b, cx);
+  }
+}
+
+// a ground boss that touches the hero hops back, so it can't pin you in a corner
+function bounceOff(o, cx) {
+  if (!o.g) return;
+  o.dx = -sgn(p.x + 4 - cx) * 1.4; o.dy = -2.2; o.t = 0;
 }
 
 function startFrost(b, combo) {
@@ -655,6 +802,7 @@ function hitboss(bl, n) {
   const b = boss;
   b.hp -= n; b.fl = 3; sfx(7);
   if (b.gel) { b.jv += 0.06; if (b.hp <= 0) b.frost = null; }
+  if (b.cake) b.jv += 0.06;
   b.sx = 1.1; b.sy = 0.92;
   spark(bl.x, bl.y, [7, 14, 15], 6);
   score += 10;
@@ -691,7 +839,7 @@ function updPud(b) {
       if (q.gen === 0 && b.st === 'fight') {
         shk = 7;
         for (const d of [-1, 1]) eb(q.x + 8 + d * 6, q.y + 14, d * 2, 0, 15, 2, undefined, 'wave');
-      } else if (q.gen === 1 && b.st === 'fight' && rnd(1) < 0.5) {
+      } else if (q.gen === 1 && b.st === 'fight' && mad && rnd(1) < 0.5) {   // caramel only when angry
         for (const i of [-1, 0, 1]) eb(q.x + 6, q.y + 2, i * 0.9, -2.4, 4, 1, 0.15);
       }
     }
@@ -702,16 +850,16 @@ function updPud(b) {
       q.t++;
       if (q.t > q.wt) {
         const d = sgn(p.x + 4 - q.x - q.s / 2);
-        q.dx = d * (0.6 + rnd(0.9));
+        q.dx = d * (0.4 + rnd(0.7));
         q.dy = -(2.6 + rnd(1.6) + q.gen * 0.3);
         q.t = 0; q.j = -0.3; q.jv = 0;
-        q.wt = ([50, 38, 26][q.gen] + rnd(16)) * (mad ? 0.7 : 1);
+        q.wt = ([62, 56, 48][q.gen] + rnd(16)) * (mad ? 0.75 : 1);
       } else if (q.t > q.wt - 14) q.j += (0.22 - q.j) * 0.2;   // wind up
     }
     if (p.dead === 0 && touch(q.x + 1, q.y + 1, q.s - 2, q.s - 1)) {
       if (p.dy > 0 && p.y + 7 < q.y + q.s * 0.5) {
         p.dy = -5; p.sq = -4; p.co = 0; q.jv += 0.15; sfx(26); dust(p.x + 4, p.y + 8, 3);
-      } else if (p.inv === 0 && b.st !== 'wait') dmg(q.x + q.s / 2);
+      } else if (p.inv === 0 && b.st !== 'wait') { dmg(q.x + q.s / 2); bounceOff(q, q.x + q.s / 2); }
     }
     hp += q.hp;
   }
@@ -864,9 +1012,45 @@ function drawBg3(cx) {
   }
 }
 
+// paris at night: the eiffel tower lit up, mansard rooftops, warm windows
+function drawBg4(cx) {
+  P.rectfill(0, 0, 127, 59, 1);
+  P.fillp(0b1010010110100101); P.rectfill(0, 60, 127, 79, 0xd1); P.fillp();
+  P.rectfill(0, 80, 127, 127, 13);
+  for (const s of stars) if (s.y < 58) P.pset(wrap(s.x - cx * s.z, 128), s.y, (t / 40 + s.tw) % 1 < 0.06 ? 7 : 6);
+  const mx = 104 - cx * 0.04;
+  P.circfill(mx, 24, 6, 7); P.pset(mx - 2, 22, 6); P.pset(mx + 1, 26, 6);
+  // eiffel tower: tapering legs, two platforms, lights that sparkle now and then
+  const ex = wrap(60 - cx * 0.08, 260) - 60, base = 100;
+  for (let k = 0; k <= 62; k++) {
+    const y = base - k;
+    const half = k < 20 ? 15 - k * 0.5 : k < 46 ? 5 - (k - 20) * 0.12 : 1.9 - (k - 46) * 0.1;
+    const c = flr(t / 90) % 4 === 0 && rnd(1) < 0.3 ? 7 : 9;
+    P.pset(ex - half, y, c); P.pset(ex + half, y, c);
+    if (k % 6 === 3 && k < 46) P.line(ex - half + 1, y, ex + half - 1, y, 4);
+  }
+  P.line(ex - 6, base - 20, ex + 6, base - 20, 10);
+  P.line(ex - 3, base - 46, ex + 3, base - 46, 10);
+  P.line(ex, base - 62, ex, base - 68, 9);
+  P.pset(ex, base - 69, t % 30 < 15 ? 7 : 8);
+  for (let a = 0; a <= 10; a++) P.pset(ex - 5 + a, base - 4 - Math.sqrt(25 - (a - 5) * (a - 5)) * 0.8, 9);
+  // rooftops: dark buildings, zinc mansard roofs, chimneys, lit windows
+  const o = cx * 0.3;
+  for (let i = -1; i < 9; i++) {
+    const wx = i + flr(o / 16), x = wx * 16 - o, h = 24 + wrap(wx * 7, 4) * 5, top = 128 - h;
+    P.rectfill(x, top, x + 15, 127, 5);
+    for (let k = 0; k < 6; k++) P.line(x + 3 - k * 0.5, top - 6 + k, x + 12 + k * 0.5, top - 6 + k, 13);
+    P.rectfill(x + 4, top - 10, x + 5, top - 6, 4);
+    P.rectfill(x + 10, top - 9, x + 11, top - 6, 4);
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++)
+      P.rectfill(x + 2 + c * 5, top + 3 + r * 7, x + 3 + c * 5, top + 5 + r * 7, wrap(wx * 3 + r * 5 + c * 7, 4) === 0 ? 10 : 1);
+  }
+}
+
 function themeBg(theme, cx, cy) {
   if (theme === 'sakura') drawBg2(cx);
   else if (theme === 'italy') drawBg3(cx);
+  else if (theme === 'paris') drawBg4(cx);
   else drawBg(cx, cy);
 }
 
@@ -881,12 +1065,14 @@ function drawPetals() {
 function draw() {
   P.cls(0);
   if (state === 'title') return drawTitle();
+  if (state === 'options') return drawOptions();
   if (state === 'inter') return drawInter();
   themeBg(L.theme, camx, camy - L.top);
   const sx = shk > 0.5 ? rnd(shk) - shk / 2 : 0, sy = shk > 0.5 ? rnd(shk) - shk / 2 : 0;
   P.camera(camx + sx, camy + sy);
   if (L.jp) { P.pal(8, 4); P.pal(14, 9); }      // sakura: bricks become wood
   if (L.it) { P.pal(8, 6); P.pal(14, 7); P.pal(2, 13); }   // italy: white marble
+  if (L.theme === 'paris') { P.pal(8, 5); P.pal(14, 6); P.pal(2, 1); }   // paris: cobblestones
   const tx0 = flr(camx / 8) - 1, ty0 = flr(camy / 8) - 1;
   for (let ty = ty0; ty < ty0 + 19; ty++) for (let tx = tx0; tx < tx0 + 19; tx++) {
     const s = mget(tx, ty);
@@ -957,6 +1143,8 @@ function drawEnt(e) {
   if (e.k === 35) { const r = flr(e.x / 3) % 4; f = r === 1 || r === 2; fy = r >= 2; }  // maki rolls
   else if (e.k === 40) s = flr(e.x / 4) % 2 === 0 ? 40 : 41;                          // meatball rolls
   else if (e.k === 42) s = e.st ? 43 : 42;                                              // pizza angry
+  else if (e.k === 48) s = flr(t / 4) % 2 ? 49 : 48;                                    // croissant flaps
+  else if (e.k === 50) { s = e.sq !== 0 ? 51 : 50; if (e.flav !== 14) P.pal(14, e.flav); } // macaron flavour
   else if (e.k === 3) s = flr(t / 6) % 2 === 0 ? 3 : 19;
   else if (e.k === 4) { s = flr(t / (e.ch ? 2 : 5)) % 2 === 0 ? 4 : 20; if (e.ch) P.pal(7, 15); }
   if (e.fl > 0) palWhite();
@@ -968,6 +1156,32 @@ function drawEnt(e) {
 
 function drawBoss() {
   const b = boss, bsx = (L.bs % 16) * 8, bsy = (L.bs >> 4) * 8;
+  if (b.cake) {
+    // sprite rows 0-5 are the top tier: crop them once it has blown off
+    const crop = b.top ? 6 : 0;
+    const j = mid(-0.5, b.j, 0.5), w = 24 * (1 + j), h = 24 * (1 - j) * (16 - crop) / 16;
+    const ox = b.st === 'die' ? rnd(2) - 1 : 0;
+    const x0 = b.x + 12 - w / 2 + ox, y0 = b.y + 24 - h;
+    P.pal(Array(15).fill(2));
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]])
+      P.sspr(bsx, bsy + crop, 16, 16 - crop, x0 + dx, y0 + dy, w, h);
+    P.pal();
+    if (b.fl > 0 || (b.st === 'die' && t % 4 < 2)) palWhite();
+    else if (b.tier < 3 && t % 8 < 4) P.pal(14, 8);           // angry: pink goes red
+    P.sspr(bsx, bsy + crop, 16, 16 - crop, x0, y0, w, h);
+    P.pal();
+    if (b.st === 'die') return;
+    const flame = (x, y) => {
+      P.pset(x, y, rnd([10, 9])); P.pset(x, y - 1, rnd([9, 8, 10]));
+      if (t % 4 < 2) P.pset(x, y - 2, 8);
+    };
+    [4, 7, 10].forEach((c, i) => {
+      const x = x0 + (c + 0.5) * w / 16;
+      if (!crop) flame(x, y0 + h / 16 - 1);
+      else { P.line(x, y0 - 3, x, y0 - 1, [12, 14, 12][i]); flame(x, y0 - 4); }
+    });
+    return;
+  }
   if (b.gel) {
     const wv = b.frost;
     if (wv && wv.len > 0) {
@@ -1096,10 +1310,32 @@ function drawTitle() {
   oprint('food run', 32, 74, 14, 2, 2);
   cprint('z: jump   x: laser', 90, 6);
   cprint('hold x: beam   hold down: shield', 98, 11);
-  if (LEVELS.length) {
-    cprint('< stage ' + (lv0 + 1) + ': ' + LEVELS[lv0].name + ' >', 106, 10);
-  }
-  if (t % 30 < 20) cprint('press z to start', 116, 7);
+  if (!LEVELS.length) return;
+  const items = ['start' + (lv0 > 0 ? ' (stage ' + (lv0 + 1) + ')' : ''), 'options'];
+  items.forEach((s, i) => {
+    const on = menu === i;
+    cprint((on && t % 20 < 14 ? '> ' : '  ') + s + '  ', 108 + i * 8, on ? 10 : 6);
+  });
+}
+
+function drawOptions() {
+  drawBg(t);
+  P.rectfill(10, 24, 117, 104, 0); P.rect(10, 24, 117, 104, 14);
+  oprint('options', 36, 30, 14, 2, 2);
+  const rows = [
+    'start stage: < ' + (lv0 + 1) + ' >',
+    'sound: < ' + (sound ? 'on' : 'off') + ' >',
+    'back',
+  ];
+  const ry = [50, 68, 80];                       // row 0 has the stage name under it
+  rows.forEach((s, i) => {
+    const on = osel === i;
+    cprint(s, ry[i], on ? 10 : 6);
+    if (on && t % 20 < 14) P.print('>', 14, ry[i], 10);
+  });
+  cprint(LEVELS[lv0].name, 57, 13);
+  cprint('up/down: choose', 90, 5);
+  cprint('left/right: change  z: ok', 96, 5);
 }
 
 // ------------------------------------------------------------ boot
@@ -1139,6 +1375,7 @@ async function boot() {
     const { sprites, audio, levels } = await loadData(get);
     P.loadSprites(sprites);
     SND = new Synth(audio);
+    SND.setMuted(!sound);
     LEVELS = levels;
     // ?level=<id> (from the editor's play button): jump straight in
     const want = new URLSearchParams(location.search).get('level');
@@ -1146,7 +1383,13 @@ async function boot() {
     if (i >= 0) { lv0 = i; start(); }
     // ?debug exposes live state in the console (for testing)
     if (new URLSearchParams(location.search).has('debug'))
-      window.FR = { get boss() { return boss; }, get p() { return p; }, get state() { return state; } };
+      window.FR = {
+        get boss() { return boss; }, get p() { return p; }, get state() { return state; },
+        get ents() { return ents; }, get ebul() { return ebul; }, get puds() { return puds; },
+        get L() { return L; }, get lives() { return lives; }, get lv() { return lv; },
+        get score() { return score; }, get arena() { return arena; }, solid, mget,
+        set lives(v) { lives = v; },
+      };
   } catch (e) {
     document.getElementById('err').textContent = 'Could not load game data: ' + e.message +
       ' - is server.py running?';

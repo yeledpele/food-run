@@ -30,7 +30,7 @@ BACKUPS = os.path.join(ROOT, 'backups')
 MAX_BODY = 2 * 1024 * 1024
 ID_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,39}$')
 HEX_RE = re.compile(r'^[0-9a-f]*$')
-THEMES = ('city', 'sakura', 'italy')
+THEMES = ('city', 'sakura', 'italy', 'paris')
 
 
 class BadRequest(Exception):
