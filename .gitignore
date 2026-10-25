@@ -1,0 +1,4 @@
+backups/
+_site/
+__pycache__/
+*.tmp

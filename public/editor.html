@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Food Run Editor</title>
+<style>
+  :root { --bg: #111; --panel: #1b1b22; --line: #2e2e3a; --text: #ddd; --dim: #8a8aa0;
+    --accent: #ff77a8; --ok: #00e436; --bad: #ff004d; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line);
+    background: var(--panel); position: sticky; top: 0; z-index: 2; }
+  header h1 { font-size: 15px; margin: 0 14px 0 0; color: var(--accent); }
+  button, select, input { font: inherit; color: var(--text); background: #26262f; border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on, .tab.on { background: var(--accent); color: #111; border-color: var(--accent); }
+  input[type=number] { width: 64px; }
+  .grow { flex: 1; }
+  #status { color: var(--dim); }
+  #status.dirty { color: var(--accent); }
+  main { padding: 14px; }
+  .row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+  .panel h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  canvas { image-rendering: pixelated; display: block; }
+  #sheet, #pix, #map { cursor: crosshair; }
+  .pal { display: grid; grid-template-columns: repeat(8, 28px); gap: 3px; margin-top: 8px; }
+  .pal div { width: 28px; height: 28px; border-radius: 3px; cursor: pointer; border: 2px solid transparent;
+    font-size: 9px; color: #fff8; display: flex; align-items: flex-end; justify-content: flex-end; padding: 1px 2px; }
+  .pal div.on { border-color: #fff; }
+  label.f { display: block; margin: 2px 0; }
+  .legend { font-size: 12px; color: var(--dim); columns: 2; }
+  .legend b { color: var(--text); font-weight: 600; }
+  #levels li { list-style: none; padding: 4px 6px; border-radius: 4px; cursor: pointer; }
+  #levels li.on { background: #33283a; color: var(--accent); }
+  #levels { margin: 0 0 8px; padding: 0; }
+  .form { display: grid; grid-template-columns: auto auto; gap: 4px 8px; align-items: center; }
+  #tiles { display: flex; flex-wrap: wrap; gap: 3px; max-width: 300px; }
+  #tiles canvas { border: 2px solid transparent; border-radius: 3px; cursor: pointer; background: #000; }
+  #tiles canvas.on { border-color: var(--accent); }
+  #mapwrap { overflow: auto; max-width: calc(100vw - 420px); max-height: calc(100vh - 120px);
+    border: 1px solid var(--line); background: #000; }
+  #checks li { margin: 2px 0; }
+  .okc { color: var(--ok); } .badc { color: var(--bad); }
+  #hover { color: var(--dim); min-height: 18px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Food Run Editor</h1>
+  <button class="tab on" data-tab="sprites">Sprites</button>
+  <button class="tab" data-tab="levels">Levels</button>
+  <span class="grow"></span>
+  <span id="status">loading...</span>
+  <a href="./" style="color:#29adff">play game</a>
+</header>
+
+<main>
+  <!-- ======================= SPRITES ======================= -->
+  <section id="tab-sprites" class="row">
+    <div class="panel">
+      <h3>Sprite sheet (click to pick)</h3>
+      <canvas id="sheet" width="512" height="256"></canvas>
+      <div style="margin-top:8px" class="legend" id="legend"></div>
+    </div>
+    <div class="panel">
+      <h3>Sprite <span id="sprno">0</span> &middot; left draw, right pick colour</h3>
+      <canvas id="pix" width="320" height="320"></canvas>
+      <div class="pal" id="pal"></div>
+    </div>
+    <div class="panel" style="min-width:200px">
+      <h3>Flags</h3>
+      <div id="flags"></div>
+      <h3 style="margin-top:12px">Tools</h3>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <button id="copy">Copy</button><button id="paste">Paste</button>
+        <button id="clear">Clear</button><button id="fliph">Flip H</button>
+        <button id="flipv">Flip V</button>
+      </div>
+      <h3 style="margin-top:12px">Preview</h3>
+      <canvas id="preview" width="64" height="64" style="width:64px;height:64px;background:#000"></canvas>
+      <div style="margin-top:14px"><button id="saveSprites" class="on">Save sprites</button></div>
+    </div>
+  </section>
+
+  <!-- ======================= LEVELS ======================= -->
+  <section id="tab-levels" class="row hidden">
+    <div class="panel" style="width:330px">
+      <h3>Levels (play order)</h3>
+      <ul id="levels"></ul>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button id="newLevel">New</button><button id="dupLevel">Duplicate</button>
+        <button id="delLevel">Delete</button>
+      </div>
+      <h3 style="margin-top:14px">Settings</h3>
+      <div class="form">
+        <span>Name</span><input id="f-name">
+        <span>Order</span><input id="f-order" type="number">
+        <span>Theme</span><select id="f-theme"><option value="city">Donut City</option><option value="sakura">Sakura</option><option value="italy">Italy</option></select>
+        <span>Size (w x h)</span><span><input id="f-w" type="number"> x <input id="f-h" type="number"> <button id="resize">Resize</button></span>
+        <span>Boss room col</span><input id="f-col" type="number">
+        <span>Boss name</span><input id="f-bname">
+        <span>Boss HP</span><input id="f-hp" type="number">
+        <span>Boss room scrolls down</span><input id="f-scroll" type="checkbox">
+        <span>Start (col,row)</span><span><input id="f-sx" type="number"> <input id="f-sy" type="number"></span>
+        <span>Respawn in room</span><span><input id="f-rx" type="number"> <input id="f-ry" type="number"></span>
+      </div>
+      <h3 style="margin-top:14px">Checks</h3>
+      <ul id="checks" style="padding-left:16px;margin:0"></ul>
+      <div style="display:flex;gap:6px;margin-top:12px">
+        <button id="saveLevel" class="on">Save level</button>
+        <button id="playLevel">Save &amp; play</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Tiles &amp; things</h3>
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="tool on" data-tool="paint">Paint</button>
+        <button class="tool" data-tool="start">Set start</button>
+        <button class="tool" data-tool="respawn">Set respawn</button>
+        <button class="tool" data-tool="room">Set boss room</button>
+      </div>
+      <div id="tiles"></div>
+      <div id="tileinfo" style="margin-top:8px;color:var(--dim);max-width:300px"></div>
+    </div>
+    <div class="panel">
+      <h3>Map &middot; left paint, right erase &middot; zoom
+        <select id="zoom"><option>1</option><option selected>2</option><option>3</option><option>4</option></select>
+        <label><input type="checkbox" id="grid"> grid</label></h3>
+      <div id="mapwrap"><canvas id="map"></canvas></div>
+      <div id="hover"></div>
+    </div>
+  </section>
+</main>
+<script type="module" src="js/editor.js"></script>
+</body>
+</html>
