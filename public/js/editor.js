@@ -399,8 +399,10 @@ addEventListener('beforeunload', e => { if (dirtyS || dirtyL) { e.preventDefault
 
 (async () => {
   try {
-    try { sprites = await api('GET', '/api/sprites'); }
-    catch (e) {
+    try {
+      if (window.FOODRUN_STATIC) throw new Error('static copy');
+      sprites = await api('GET', '/api/sprites');
+    } catch (e) {
       // no server: fall back to the static bundle (browse only)
       BUNDLE = await fetch('data/bundle.json').then(r => { if (!r.ok) throw e; return r.json(); });
       sprites = await api('GET', '/api/sprites');

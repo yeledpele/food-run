@@ -1124,6 +1124,7 @@ function loop() {
 // from server.py's API when it's running; otherwise (e.g. GitHub Pages)
 // from the static bundle that tools/export_static.py writes
 async function loadData(get) {
+  if (window.FOODRUN_STATIC) return get('data/bundle.json');
   try {
     const [sprites, audio, list] = await Promise.all([get('api/sprites'), get('api/audio'), get('api/levels')]);
     return { sprites, audio, levels: await Promise.all(list.map(l => get('api/levels/' + l.id))) };

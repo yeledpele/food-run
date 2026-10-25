@@ -18,6 +18,13 @@ OUT = os.path.join(ROOT, '_site')
 def main():
     shutil.rmtree(OUT, ignore_errors=True)
     shutil.copytree(os.path.join(ROOT, 'public'), OUT)
+    # mark the pages as static so they go straight to the bundle (no API probes)
+    for page in ('index.html', 'editor.html'):
+        p = os.path.join(OUT, page)
+        html = open(p, encoding='utf-8').read()
+        marker = '<script>window.FOODRUN_STATIC = true</script>\n<script type="module"'
+        assert '<script type="module"' in html, page
+        open(p, 'w', encoding='utf-8').write(html.replace('<script type="module"', marker, 1))
     lvdir = os.path.join(DATA, 'levels')
     levels = [json.load(open(os.path.join(lvdir, f))) for f in os.listdir(lvdir) if f.endswith('.json')]
     levels.sort(key=lambda l: (l['order'], l['id']))
